@@ -37,6 +37,17 @@ public final class InMemoryBookingStore implements BookingStore {
     }
 
     @Override
+    public synchronized boolean insertIfFree(Booking booking) {
+        // The check and the write hold the same lock, so nothing can take the
+        // slot in between, including a promotion in cancelAndPromote.
+        if (overlapsConfirmed(booking)) {
+            return false;
+        }
+        bookings.add(booking);
+        return true;
+    }
+
+    @Override
     public synchronized List<Booking> bookingsForRoom(String roomId) {
         List<Booking> forRoom = new ArrayList<>();
         for (Booking booking : bookings) {

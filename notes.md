@@ -85,3 +85,34 @@ mvn -B test -Dtest='RaceTest#twoCustomersCannotBothConfirmAfterTheRecheck'
 Undo the patch afterward with `git apply -R proposed-fix.diff`.
 
 # Milestone 3
+
+**The fix:** "check if the slot is free" and "save the booking" used to be two
+separate steps, so someone else could sneak in between them. Now they're one step
+that nobody can interrupt (`insertIfFree` in the store). So the second customer
+always sees the first customer's booking and gets rejected.
+
+**The cost:** only one store call runs at a time, so bookings wait in line, even
+for different rooms.
+
+**The catch:** the tests pass, but my race test no longer pauses anything, because
+there's no gap left to pause in (`gate fired=false`). It can't prove the fix works.
+It only goes red if someone brings the old two-step code back.
+
+To run everything:
+
+```
+mvn -B clean test
+```
+
+# Key takeaways
+
+- **Safe steps aren't safe together.** Each store call was locked, but someone could
+  still sneak in between two calls.
+- **Passing tests can miss race conditions.** They depend on timing, so the normal
+  tests and the stress runner can pass even with the bug there.
+- **Force the bad timing.** A test that pauses a thread at the exact bad moment
+  fails every time, so you can prove the bug is real.
+- **A patch that sounds right can still be wrong.** The teammate's patch passed my
+  first test, but pausing in a different spot still broke it.
+- **Fixes have a cost.** The real fix makes other callers wait in line, so you should
+  be able to say who waits.

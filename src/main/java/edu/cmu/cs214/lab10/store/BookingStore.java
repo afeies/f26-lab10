@@ -29,6 +29,21 @@ public interface BookingStore {
     void insert(Booking booking);
 
     /**
+     * Stores the booking only if no CONFIRMED booking in its room overlaps its
+     * range, as one indivisible step. No other method can change the store
+     * between the check and the write.
+     *
+     * <p>A caller that needs "book it if it is free" must use this method. A
+     * {@link #hasOverlap} call followed by {@link #insert} is two steps, and its
+     * answer can be stale by the time the write happens.
+     *
+     * @param booking the booking to store
+     * @return true when the booking was stored, false when the range was taken
+     *     and the store did not change
+     */
+    boolean insertIfFree(Booking booking);
+
+    /**
      * Every booking held for the room, in insertion order, in every status.
      *
      * @return a snapshot the caller owns; later writes to the store do not
