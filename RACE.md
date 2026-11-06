@@ -63,9 +63,47 @@ you missed. Leave the table as you first wrote it.
 
 ### Your race test
 
-**How you aimed `PausingStore`, and the result.** Method name and call index, why
-that pair pins the schedule you predicted, and the output of two separate
-runs (assertion failure and log lines).
+**How you aimed `PausingStore`, and the result.** Aim: `hasOverlap`, call 1.
+
+Why that pair pins the schedule: A starts alone, so it must make call 1, and the
+gate parks it after the real store has answered `false` and released its lock,
+but before `book` can use that answer. That parks A at exactly the point between
+the check and the write. `awaitPaused()` then guarantees B starts only once A is
+there, and B's `hasOverlap` is call 2, so the one-shot gate lets it straight
+through to finish while A waits. No sleeps or lucky timing are involved. By
+reasoning (not run), `insert`, 1 would park A after its row is stored, so B would
+be correctly rejected and the test would pass without exercising the race.
+
+The run matched the prediction: bk-1 (B) was logged before bk-2 (A), neither was
+rejected, and the end state was 2 CONFIRMED. `gate fired=true hasOverlap calls=2`
+is a line the test prints to show the gate fired and each customer checked once.
+The runs took about 0.03 s, so no bounded wait timed out.
+
+Run 1 (`mvn -B test -Dtest=RaceTest`):
+
+```
+2026-11-06T14:22:13.598Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=540 end=600
+2026-11-06T14:22:13.601Z INFO booking.confirmed booking=bk-2 room=WEH-5409 start=540 end=600
+gate fired=true hasOverlap calls=2
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.044 s <<< FAILURE! -- in edu.cmu.cs214.lab10.harness.RaceTest
+[ERROR] edu.cmu.cs214.lab10.harness.RaceTest.twoCustomersCannotBothConfirmTheSameSlot -- Time elapsed: 0.031 s <<< FAILURE!
+[ERROR]   RaceTest.twoCustomersCannotBothConfirmTheSameSlot:54 CONFIRMED bookings covering WEH-5409 540..600 ==> expected: <1> but was: <2>
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+```
+
+Run 2 (`mvn -B test -Dtest=RaceTest`, a separate JVM):
+
+```
+2026-11-06T14:22:15.424Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=540 end=600
+2026-11-06T14:22:15.427Z INFO booking.confirmed booking=bk-2 room=WEH-5409 start=540 end=600
+gate fired=true hasOverlap calls=2
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.045 s <<< FAILURE! -- in edu.cmu.cs214.lab10.harness.RaceTest
+[ERROR] edu.cmu.cs214.lab10.harness.RaceTest.twoCustomersCannotBothConfirmTheSameSlot -- Time elapsed: 0.030 s <<< FAILURE!
+[ERROR]   RaceTest.twoCustomersCannotBothConfirmTheSameSlot:54 CONFIRMED bookings covering WEH-5409 540..600 ==> expected: <1> but was: <2>
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+```
 
 ---
 

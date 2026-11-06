@@ -1,12 +1,69 @@
 package edu.cmu.cs214.lab10.harness;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import edu.cmu.cs214.lab10.domain.BookingStatus;
+import edu.cmu.cs214.lab10.domain.Room;
+import edu.cmu.cs214.lab10.service.BookingService;
+import edu.cmu.cs214.lab10.store.InMemoryBookingStore;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
 /**
- * Where your concurrency tests go.
- *
- * <p>Empty on purpose. The wiring you need is written out below; what to aim it
- * at, and what scenario to drive through it, is yours to work out.
+ * Concurrency tests that drive a chosen interleaving with {@link PausingStore}.
  */
 class RaceTest {
+
+    private static final String WEAN = "WEH-5409";
+    private static final int START = 540;
+    private static final int END = 600;
+    private static final List<Room> ROOMS = List.of(
+            new Room(WEAN, "Wean 5409", 12),
+            new Room("GHC-4301", "Gates 4301", 30));
+
+    /**
+     * RES-4471. Parks customer A after its availability check has answered "free"
+     * and before it writes, then runs customer B's whole booking in that window.
+     */
+    @Test
+    void twoCustomersCannotBothConfirmTheSameSlot() throws InterruptedException {
+        // The real store holds the bookings the test checks at the end.
+        InMemoryBookingStore real = new InMemoryBookingStore();
+        // Pause the first hasOverlap call, right after it answers "free".
+        PausingStore gated = new PausingStore(real, "hasOverlap", 1);
+        // Both customers share one service, which goes through the pausing store.
+        BookingService service = new BookingService(gated, ROOMS);
+
+        // Customer A starts alone, so A makes hasOverlap call 1 and gets paused.
+        Thread customerA = new Thread(() -> service.book(WEAN, START, END), "customer-A");
+        customerA.start();
+
+        // Wait until A is paused between its check and its insert.
+        gated.awaitPaused();
+
+        // Customer B books the same slot and passes through, since the gate fires only once.
+        Thread customerB = new Thread(() -> service.book(WEAN, START, END), "customer-B");
+        customerB.start();
+        // Wait for B to finish its whole booking while A is still paused.
+        customerB.join(PausingStore.TIMEOUT_MILLIS);
+
+        // Let A continue with its stale "free" answer.
+        gated.release();
+        // Wait for A to finish its insert.
+        customerA.join(PausingStore.TIMEOUT_MILLIS);
+
+        // Printed, not asserted: this shows whether the aim fired on this run
+        // without tying the test to one schedule.
+        System.out.println("gate fired=" + gated.fired() + " hasOverlap calls=" + gated.targetCallCount());
+
+        // Count CONFIRMED bookings for this slot, reading the real store directly.
+        long confirmed = real.bookingsForRoom(WEAN).stream()
+                .filter(booking -> booking.status() == BookingStatus.CONFIRMED)
+                .filter(booking -> booking.overlaps(START, END))
+                .count();
+        // The invariant: the slot must have exactly one CONFIRMED booking.
+        assertEquals(1, confirmed, "CONFIRMED bookings covering " + WEAN + " " + START + ".." + END);
+    }
 
     // ------------------------------------------------------------------
     // Wiring example 1: wrap the store
