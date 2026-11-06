@@ -66,4 +66,22 @@ milestone 3.
 
 # Milestone 2
 
+A teammate's patch checks if the slot is free a second time before saving.
+
+- My milestone 1 test passed, but it pauses A before the second check, so it never
+  tests the gap that's left.
+- I added a test that pauses A right after the second check. B books the slot, then
+  A saves too. That gives 2 confirmed bookings, every run.
+
+**Verdict: reject.** The gap between the last check and the save is still there. The
+patch only makes the bug rarer. I undid the patch.
+
+To run the new test, apply the patch first (`git apply proposed-fix.diff`), then:
+
+```
+mvn -B test -Dtest='RaceTest#twoCustomersCannotBothConfirmAfterTheRecheck'
+```
+
+Undo the patch afterward with `git apply -R proposed-fix.diff`.
+
 # Milestone 3

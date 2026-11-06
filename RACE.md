@@ -109,13 +109,83 @@ gate fired=true hasOverlap calls=2
 
 ## Milestone 2: the patch a teammate sent
 
-**Your milestone-1 test on the patched code.** Green or red. Paste the result.
+**Your milestone-1 test on the patched code.** Green, on both runs. The full
+suite was green too (12 tests). `calls=4` is A's check, B's check, B's re-check,
+and A's re-check.
 
-**The re-aimed run.** Method name, call index, the pasted result, and one line
-on why that aim tests the patch rather than sidestepping it.
+```
+2026-11-06T14:35:35.852Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=540 end=600
+2026-11-06T14:35:35.860Z INFO booking.rejected room=WEH-5409 start=540 end=600 reason=slot already held
+gate fired=true hasOverlap calls=4
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.064 s -- in edu.cmu.cs214.lab10.harness.RaceTest
+[INFO] BUILD SUCCESS
+```
 
-**Your verdict.** Accept or reject, and what your milestone-1 result does and
-does not show about the patch.
+**The re-aimed run.** `twoCustomersCannotBothConfirmAfterTheRecheck`, aim:
+`hasOverlap`, call 2. It failed the same way on both runs (`mvn -B test
+-Dtest='RaceTest#twoCustomersCannotBothConfirmAfterTheRecheck'`, separate JVMs).
+
+Why this aim tests the patch rather than sidestepping it: A starts alone, so call
+1 is its first check and call 2 is the patch's own re-check. The gate parks A after
+the re-check answers "free" and before `insert`, which is the window the patch's
+comment says no longer exists. B then makes calls 3 and 4, both "free", and
+inserts. A wakes up and inserts on its stale answer. A third check would leave the
+same gap, because any check that is not under one lock with the write can go stale.
+
+| Step | Thread A | Thread B |
+|---|---|---|
+| t1 | `hasOverlap` (call 1): `false`. `nextId()` gives bk-1. | |
+| t2 | Re-check `hasOverlap` (call 2): `false`. Parked before returning. | |
+| t3 | | `hasOverlap` (call 3): `false`. `nextId()` gives bk-2. Re-check (call 4): `false`. |
+| t4 | | `insert` bk-2, CONFIRMED. Logged first. |
+| t5 | Released with the stale `false`. `insert` bk-1, CONFIRMED. | |
+
+Run 1:
+
+```
+2026-11-06T14:35:46.786Z INFO booking.confirmed booking=bk-2 room=WEH-5409 start=540 end=600
+2026-11-06T14:35:46.789Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=540 end=600
+gate fired=true hasOverlap calls=4
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.043 s <<< FAILURE! -- in edu.cmu.cs214.lab10.harness.RaceTest
+[ERROR]   RaceTest.twoCustomersCannotBothConfirmAfterTheRecheck:102 CONFIRMED bookings covering WEH-5409 540..600 ==> expected: <1> but was: <2>
+[INFO] BUILD FAILURE
+```
+
+Run 2:
+
+```
+2026-11-06T14:35:48.640Z INFO booking.confirmed booking=bk-2 room=WEH-5409 start=540 end=600
+2026-11-06T14:35:48.644Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=540 end=600
+gate fired=true hasOverlap calls=4
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.048 s <<< FAILURE! -- in edu.cmu.cs214.lab10.harness.RaceTest
+[ERROR]   RaceTest.twoCustomersCannotBothConfirmAfterTheRecheck:102 CONFIRMED bookings covering WEH-5409 540..600 ==> expected: <1> but was: <2>
+[INFO] BUILD FAILURE
+```
+
+**Your verdict.** **Reject.** On the patched code, the re-aimed test ends with 2
+CONFIRMED bookings for WEH-5409 [540, 600) on every run, which breaks the same
+invariant RES-4471 reports. The patch adds a second `hasOverlap` but still has no
+lock spanning the last check and the `insert`, so the check-then-act gap is moved,
+not closed. The patch's "no window left" comment is false.
+
+What the milestone-1 result shows: the patch handles one schedule, where B's whole
+booking lands between A's first check and A's re-check. A's re-check sees B's row.
+
+What it does not show: that the race is gone. That test parks A before the re-check,
+so it never exercises the gap that remains. Its green result is true but only covers
+that one schedule. The teammate's evidence has the same limit: the suite is
+single-threaded, and "no bad rounds" depends on timing. `StressRunner 2000` on the
+patched code gave 0, 0, then 1 bad rounds in three runs (`round 81: 2 confirmed
+bookings for WEH-5409 540..600`), against 46, 18, and 19 on the unpatched code. So
+the patch makes the bug rarer and harder to catch, without removing it.
+
+The patch is undone (`git apply -R proposed-fix.diff`). Milestone 3 starts from the
+original `BookingService`. The re-aimed test's aim only means something with the
+patch applied: on the original code A makes call 1 and finishes without parking,
+`awaitPaused()` times out, and B is parked on call 2 with a correct `true`, so the
+test passes after about 4 s without exercising a race. Its green result there says
+nothing about the original code, which the milestone-1 test still fails (expected
+1, actual 2).
 
 ---
 

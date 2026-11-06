@@ -65,6 +65,43 @@ class RaceTest {
         assertEquals(1, confirmed, "CONFIRMED bookings covering " + WEAN + " " + START + ".." + END);
     }
 
+    /**
+     * RES-4471 against proposed-fix.diff. Same two customers and same invariant, but
+     * A is parked after the patch's re-check has answered "free" and before it
+     * writes. Aimed at the patched code: A alone makes hasOverlap calls 1 and 2.
+     */
+    @Test
+    void twoCustomersCannotBothConfirmAfterTheRecheck() throws InterruptedException {
+        InMemoryBookingStore real = new InMemoryBookingStore();
+        // Pause the second hasOverlap call: A's re-check, the patch's last look.
+        PausingStore gated = new PausingStore(real, "hasOverlap", 2);
+        BookingService service = new BookingService(gated, ROOMS);
+
+        // Customer A starts alone, so A makes calls 1 and 2 and gets paused on 2.
+        Thread customerA = new Thread(() -> service.book(WEAN, START, END), "customer-A");
+        customerA.start();
+
+        // Wait until A is paused between its re-check and its insert.
+        gated.awaitPaused();
+
+        // Customer B makes calls 3 and 4, both "free", and inserts while A is paused.
+        Thread customerB = new Thread(() -> service.book(WEAN, START, END), "customer-B");
+        customerB.start();
+        customerB.join(PausingStore.TIMEOUT_MILLIS);
+
+        // Let A continue with its stale re-check answer.
+        gated.release();
+        customerA.join(PausingStore.TIMEOUT_MILLIS);
+
+        System.out.println("gate fired=" + gated.fired() + " hasOverlap calls=" + gated.targetCallCount());
+
+        long confirmed = real.bookingsForRoom(WEAN).stream()
+                .filter(booking -> booking.status() == BookingStatus.CONFIRMED)
+                .filter(booking -> booking.overlaps(START, END))
+                .count();
+        assertEquals(1, confirmed, "CONFIRMED bookings covering " + WEAN + " " + START + ".." + END);
+    }
+
     // ------------------------------------------------------------------
     // Wiring example 1: wrap the store
     //
